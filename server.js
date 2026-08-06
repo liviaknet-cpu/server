@@ -213,12 +213,14 @@ async function enviarParaAutentique(pdfBytes, nomeCliente) {
     throw new Error('Autentique retornou erro: ' + JSON.stringify(resultado.errors));
   }
   const assinaturas = resultado.data.createDocument.signatures;
-  if (!assinaturas || !assinaturas[0] || !assinaturas[0].link) {
-    // Debug temporário: devolve a resposta bruta da Autentique pra investigar
+  // A Autentique pode devolver mais de uma assinatura (ex: signatário automático
+  // da conta/organização). Busca especificamente a que tem link de verdade.
+  const assinaturaComLink = (assinaturas || []).find(s => s.link && s.link.short_link);
+  if (!assinaturaComLink) {
     throw new Error('Não foi possível obter o link de assinatura da Autentique. Resposta bruta: ' + JSON.stringify(resultado));
   }
   return {
-    link_termo: assinaturas[0].link.short_link,
+    link_termo: assinaturaComLink.link.short_link,
     documento_id: resultado.data.createDocument.id
   };
 }
