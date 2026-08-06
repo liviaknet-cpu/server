@@ -214,7 +214,8 @@ async function enviarParaAutentique(pdfBytes, nomeCliente) {
   }
   const assinaturas = resultado.data.createDocument.signatures;
   if (!assinaturas || !assinaturas[0] || !assinaturas[0].link) {
-    throw new Error('Não foi possível obter o link de assinatura da Autentique.');
+    // Debug temporário: devolve a resposta bruta da Autentique pra investigar
+    throw new Error('Não foi possível obter o link de assinatura da Autentique. Resposta bruta: ' + JSON.stringify(resultado));
   }
   return {
     link_termo: assinaturas[0].link.short_link,
