@@ -124,16 +124,16 @@ const UNIT_CONFIGS = {
 
 };
 
-function safeSetText(form, fieldId, value) {
+function safeSetText(form, fieldId, value, avisos) {
   if (!fieldId || !value) return;
   try { form.getTextField(fieldId).setText(String(value)); }
-  catch (e) { console.warn('Campo de texto não encontrado: ' + fieldId); }
+  catch (e) { avisos.push('Campo de texto não encontrado: ' + fieldId); }
 }
 
-function safeCheck(form, fieldId) {
+function safeCheck(form, fieldId, avisos) {
   if (!fieldId) return;
   try { form.getCheckBox(fieldId).check(); }
-  catch (e) { console.warn('Checkbox não encontrado: ' + fieldId); }
+  catch (e) { avisos.push('Checkbox não encontrado: ' + fieldId); }
 }
 
 async function gerarPdfPreenchido(dados) {
@@ -145,42 +145,44 @@ async function gerarPdfPreenchido(dados) {
   const pdfDoc = await PDFDocument.load(templateBytes);
   const form = pdfDoc.getForm();
   const F = cfg.FIELDS;
+  const avisos = [];
 
-  safeSetText(form, F.nome, dados.nome);
-  safeSetText(form, F.cpf, dados.cpf);
-  safeSetText(form, F.cidade, dados.cidade || cfg.defaultCidade);
-  safeSetText(form, F.estado, cfg.defaultEstado);
-  safeSetText(form, F.totalComBeneficio, dados.valorTotal);
+  safeSetText(form, F.nome, dados.nome, avisos);
+  safeSetText(form, F.cpf, dados.cpf, avisos);
+  safeSetText(form, F.cidade, dados.cidade || cfg.defaultCidade, avisos);
+  safeSetText(form, F.estado, cfg.defaultEstado, avisos);
+  safeSetText(form, F.totalComBeneficio, dados.valorTotal, avisos);
   if (cfg.hasLocalData) {
     const dataFormatada = new Date().toLocaleDateString('pt-BR');
-    safeSetText(form, F.localData, (dados.cidade || cfg.defaultCidade) + ', ' + dataFormatada);
+    safeSetText(form, F.localData, (dados.cidade || cfg.defaultCidade) + ', ' + dataFormatada, avisos);
   }
 
-  safeSetText(form, F.contratanteNome_1, dados.nome);
-  safeSetText(form, F.contratanteCpf_1, dados.cpf);
-  safeSetText(form, F.contratanteNome_2, dados.nome);
-  safeSetText(form, F.contratanteCpf_2, dados.cpf);
+  safeSetText(form, F.contratanteNome_1, dados.nome, avisos);
+  safeSetText(form, F.contratanteCpf_1, dados.cpf, avisos);
+  safeSetText(form, F.contratanteNome_2, dados.nome, avisos);
+  safeSetText(form, F.contratanteCpf_2, dados.cpf, avisos);
 
-  safeCheck(form, F.contratadaAlgar);
-  safeCheck(form, F.cienteField);
-  safeCheck(form, cfg.prazo12meses);
-  cfg.declaracoesPadrao.forEach(f => safeCheck(form, f));
+  safeCheck(form, F.contratadaAlgar, avisos);
+  safeCheck(form, F.cienteField, avisos);
+  safeCheck(form, cfg.prazo12meses, avisos);
+  cfg.declaracoesPadrao.forEach(f => safeCheck(form, f, avisos));
 
   if (dados.tipoOferta === 'combo') {
     const label = dados.velocidade + ' ' + dados.tipoAbrangencia;
     const item = cfg.bandaLarga.find(b => b.label === label);
     if (!item) throw new Error('Combinação de plano não encontrada: ' + label);
-    safeCheck(form, item.produto);
+    safeCheck(form, item.produto, avisos);
     if (cfg.hasTier) {
-      safeCheck(form, item.p1p);
+      safeCheck(form, item.p1p, avisos);
     } else {
-      safeCheck(form, item.preco);
+      safeCheck(form, item.preco, avisos);
     }
   }
   const superWifiItem = cfg.svas.find(s => s.label.startsWith('Super Wi-Fi (1'));
-  if (superWifiItem) safeCheck(form, superWifiItem.field);
+  if (superWifiItem) safeCheck(form, superWifiItem.field, avisos);
 
-  return await pdfDoc.save();
+  const pdfBytes = await pdfDoc.save();
+  return { pdfBytes, avisos };
 }
 
 async function enviarParaAutentique(pdfBytes, nomeCliente) {
@@ -231,8 +233,20 @@ app.post('/gerar-termo', async (req, res) => {
     if (!dados.unidade || !dados.nome || !dados.cpf || !dados.tipoOferta || !dados.valorTotal) {
       return res.status(400).json({ erro: 'Campos obrigatórios ausentes: unidade, nome, cpf, tipoOferta, valorTotal.' });
     }
-    const pdfBytes = await gerarPdfPreenchido(dados);
+    const { pdfBytes, avisos } = await gerarPdfPreenchido(dados);
+
+    // Modo de teste: adicione "modoTeste": true no corpo da requisição pra
+    // só ver o diagnóstico de campos, sem gastar documento na Autentique.
+    if (dados.modoTeste) {
+      return res.json({
+        modo: 'teste — nada foi enviado pra Autentique',
+        campos_com_problema: avisos,
+        total_avisos: avisos.length
+      });
+    }
+
     const resultado = await enviarParaAutentique(pdfBytes, dados.nome);
+    resultado.avisos_preenchimento = avisos; // mesmo no modo real, mostra o que falhou (se algo falhou)
     res.json(resultado);
   } catch (err) {
     console.error(err);
