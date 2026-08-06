@@ -44,7 +44,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { PDFDocument } = require('pdf-lib');
+const { PDFDocument, PDFName, PDFBool } = require('pdf-lib');
 
 const app = express();
 app.use(express.json());
@@ -181,6 +181,15 @@ async function gerarPdfPreenchido(dados) {
   const superWifiItem = cfg.svas.find(s => s.label.startsWith('Super Wi-Fi (1'));
   if (superWifiItem) safeCheck(form, superWifiItem.field, avisos);
 
+  // Corrige um problema comum de renderização: se o PDF tiver a flag
+  // NeedAppearances ligada, alguns visualizadores (inclusive o da Autentique)
+  // podem não desenhar os checkboxes marcados mesmo com o valor gravado certo.
+  try {
+    form.acroForm.dict.set(PDFName.of('NeedAppearances'), PDFBool.False);
+  } catch (e) {
+    avisos.push('Não foi possível ajustar NeedAppearances: ' + e.message);
+  }
+
   const pdfBytes = await pdfDoc.save();
   return { pdfBytes, avisos };
 }
@@ -230,13 +239,26 @@ async function enviarParaAutentique(pdfBytes, nomeCliente) {
 app.post('/gerar-termo', async (req, res) => {
   try {
     const dados = req.body;
+
+    // Modo de diagnóstico: lista todos os campos reais do PDF da unidade
+    // pedida, sem precisar de nome/cpf/etc. Útil pra achar o ID certo de
+    // um campo que não bateu com o mapeamento.
+    if (dados.listarCampos) {
+      const cfg = UNIT_CONFIGS[dados.unidade];
+      if (!cfg) return res.status(400).json({ erro: 'Unidade desconhecida: ' + dados.unidade });
+      const templatePath = path.join(__dirname, 'templates', cfg.templateFile);
+      const templateBytes = fs.readFileSync(templatePath);
+      const pdfDoc = await PDFDocument.load(templateBytes);
+      const form = pdfDoc.getForm();
+      const campos = form.getFields().map(f => ({ nome: f.getName(), tipo: f.constructor.name }));
+      return res.json({ total: campos.length, campos });
+    }
+
     if (!dados.unidade || !dados.nome || !dados.cpf || !dados.tipoOferta || !dados.valorTotal) {
       return res.status(400).json({ erro: 'Campos obrigatórios ausentes: unidade, nome, cpf, tipoOferta, valorTotal.' });
     }
     const { pdfBytes, avisos } = await gerarPdfPreenchido(dados);
 
-    // Modo de teste: adicione "modoTeste": true no corpo da requisição pra
-    // só ver o diagnóstico de campos, sem gastar documento na Autentique.
     if (dados.modoTeste) {
       return res.json({
         modo: 'teste — nada foi enviado pra Autentique',
@@ -246,7 +268,7 @@ app.post('/gerar-termo', async (req, res) => {
     }
 
     const resultado = await enviarParaAutentique(pdfBytes, dados.nome);
-    resultado.avisos_preenchimento = avisos; // mesmo no modo real, mostra o que falhou (se algo falhou)
+    resultado.avisos_preenchimento = avisos;
     res.json(resultado);
   } catch (err) {
     console.error(err);
