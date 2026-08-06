@@ -1,0 +1,16 @@
+{
+  "name": "servico-termo-autentique",
+  "version": "1.0.0",
+  "description": "Preenche o Termo oficial da Algar e envia para assinatura via Autentique",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pdf-lib": "^1.17.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
